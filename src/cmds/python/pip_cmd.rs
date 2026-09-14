@@ -57,8 +57,8 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     Ok(exit_code)
 }
 
-/// Human-readable program name for messages: `uv pip` when routed through
-/// uv, plain `pip` otherwise. Keeps error text from reading "pip pip list".
+/// Human-readable program name for messages. `uv pip` when routed through
+/// uv, plain `pip` otherwise.
 fn prog_label(base_cmd: &str) -> &'static str {
     if base_cmd == "uv" { "uv pip" } else { "pip" }
 }
