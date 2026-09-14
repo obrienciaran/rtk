@@ -736,7 +736,14 @@ fn capture(cmd: &mut Command) -> Result<CaptureResult> {
 /// instead of the raw path silently dropping it.
 fn capture_raw(cmd: &mut Command) -> Result<CaptureBytes> {
     let program = cmd.get_program().to_string_lossy().into_owned();
-    let output = cmd.output().context("Failed to execute command")?;
+    // Name the program: a bare "os error 2" gives no hint whether the binary is
+    // missing or is a script whose shebang points at a deleted interpreter.
+    let output = cmd.output().with_context(|| {
+        format!(
+            "failed to spawn `{program}` (is it installed, or does its \
+             shebang point at a missing interpreter?)"
+        )
+    })?;
     let exit_code = super::utils::exit_code_from_output(&output, &program);
     Ok(CaptureBytes {
         stdout: output.stdout,
@@ -1116,6 +1123,24 @@ pub(crate) mod tests {
         assert!(result.success());
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("hello_capture"));
+    }
+
+    #[test]
+    fn test_exec_capture_spawn_failure_names_program() {
+        let missing = "definitely-not-a-real-binary-xyz";
+        let mut cmd = Command::new(missing);
+        let Err(err) = exec_capture(&mut cmd) else {
+            panic!("spawning a missing program must fail");
+        };
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains(missing),
+            "error should name the program, got: {chain}"
+        );
+        assert!(
+            chain.contains("interpreter"),
+            "error should hint at the shebang cause, got: {chain}"
+        );
     }
 
     #[test]
