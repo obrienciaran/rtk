@@ -728,6 +728,20 @@ fn capture(cmd: &mut Command) -> Result<CaptureResult> {
     })
 }
 
+/// Context for a failed spawn: always names the program (the OS error that
+/// follows says why). Only `NotFound` gets a hint, because a bare "os error 2"
+/// on a path that visibly exists is the one case the OS message doesn't
+/// explain — the file's `#!` interpreter or dynamic loader is what's missing.
+/// Other kinds (permission denied, exec format error, ...) already say enough.
+fn spawn_failure_message(program: &str, err: &std::io::Error) -> String {
+    let hint = if err.kind() == std::io::ErrorKind::NotFound {
+        " (not on PATH, or the file's interpreter or loader is missing)"
+    } else {
+        ""
+    };
+    format!("failed to spawn `{program}`{hint}")
+}
+
 /// Run `cmd` to completion and return its raw bytes plus a signal-aware exit code.
 /// The single spot that turns an `ExitStatus` into a code via
 /// [`exit_code_from_output`](super::utils::exit_code_from_output) — so the
@@ -736,13 +750,9 @@ fn capture(cmd: &mut Command) -> Result<CaptureResult> {
 /// instead of the raw path silently dropping it.
 fn capture_raw(cmd: &mut Command) -> Result<CaptureBytes> {
     let program = cmd.get_program().to_string_lossy().into_owned();
-    // Name the program: a bare "os error 2" gives no hint whether the binary is
-    // missing or is a script whose shebang points at a deleted interpreter.
-    let output = cmd.output().with_context(|| {
-        format!(
-            "failed to spawn `{program}` (is it installed, or does its \
-             shebang point at a missing interpreter?)"
-        )
+    let output = cmd.output().map_err(|e| {
+        let msg = spawn_failure_message(&program, &e);
+        anyhow::Error::new(e).context(msg)
     })?;
     let exit_code = super::utils::exit_code_from_output(&output, &program);
     Ok(CaptureBytes {
@@ -1138,9 +1148,30 @@ pub(crate) mod tests {
             "error should name the program, got: {chain}"
         );
         assert!(
-            chain.contains("interpreter"),
-            "error should hint at the shebang cause, got: {chain}"
+            chain.contains("interpreter or loader is missing"),
+            "NotFound should carry the ENOENT hint, got: {chain}"
         );
+        assert!(
+            chain.contains("os error 2") || chain.contains("No such file"),
+            "the OS error must stay in the chain, got: {chain}"
+        );
+    }
+
+    #[test]
+    fn test_spawn_failure_message_hint_only_for_not_found() {
+        use std::io::{Error, ErrorKind};
+
+        let not_found = spawn_failure_message("pip", &Error::from(ErrorKind::NotFound));
+        assert_eq!(
+            not_found,
+            "failed to spawn `pip` (not on PATH, or the file's interpreter or loader is missing)"
+        );
+
+        // Permission denied / exec-format errors already explain themselves; a
+        // "not on PATH" hint there would be misleading.
+        let denied =
+            spawn_failure_message("/usr/bin/pip", &Error::from(ErrorKind::PermissionDenied));
+        assert_eq!(denied, "failed to spawn `/usr/bin/pip`");
     }
 
     #[test]
