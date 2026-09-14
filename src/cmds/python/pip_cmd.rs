@@ -57,8 +57,8 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     Ok(exit_code)
 }
 
-/// Human-readable program name for messages. `uv pip` when routed through
-/// uv, plain `pip` otherwise.
+/// `base_cmd` is already "pip" on the plain path, so a hardcoded "pip" after
+/// it doubled up as "pip pip list" (#4050).
 fn prog_label(base_cmd: &str) -> &'static str {
     if base_cmd == "uv" { "uv pip" } else { "pip" }
 }
